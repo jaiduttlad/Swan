@@ -1,0 +1,146 @@
+//////////////////////////////////////////////////////////////
+//Swans BackTesting System plus Exploration
+//Coded by Jaidutt
+//Adapted from Chapter 41: Swans from Renato Di Lorenzo's 'How to Make Money by Fast Trading'
+
+_SECTION_BEGIN( "Swans" );
+SetTradeDelays( 0, 0, 0, 0 );
+SetOption( "InitialEquity", 100000 ); //added by JD
+SetOption( "MinShares", 1 ); //added by JD
+PositionSize = -10;
+RoundLotSize = 1;
+//SetOption( "allowsamebarexit", True );
+
+HaC = ( O + H + L + C ) / 4;
+HaO = AMA( Ref( HaC, -1 ), 0.5 );
+HaH = Max( H, Max( HaC, HaO ) );
+HaL = Min( L, Min( HaC, HaO ) );
+
+downTrend = LLV( HaL, 5 ) ;
+upTrend = HHV( HaH, 5 ) ;
+
+//per = Optimize( "Period", 1, 1, 7, 1 );
+
+//BUY SETUP
+
+Sell = 0;
+Buy = HaH > Ref( upTrend, -1 );
+
+//SHORT SETUP
+Cover = 0;
+Short = HaL < Ref( downTrend, -1 );
+
+
+//PROFIT TARGET- Default 3%
+
+PT = Optimize( "Profit Target %", 9, 1, 10, 1 );
+
+//STOPLOSS - Default 0.1%
+
+SL = Optimize( "Initial Stop Loss %", 4, 1, 5, 0.5 );
+
+dist = 1.5 * ATR( 10 );
+
+BT = Null; 	//BuyTrail
+BP = Null; 	//BuyProfit
+FB = 0; 		//FlagBuy
+
+
+ST = Null;		//ShortTrail
+SP = Null;		//ShortProfit
+FS = 0;		//FlagShort
+
+
+for ( i = 1; i < BarCount; i++ )
+{
+
+    if ( FB == 0 AND Buy[ i ] ) 																//initial Buy signal, set flag as 1 and calculate initial stop
+    {
+        FB = 1; 																					//flag = 1  means buy signal is generated
+        BuyPrice[i] = O[i];																	//set buy price as previous close
+        BT[i]  = L[i-1] * ( 1 - SL / 100 ); 																			//set initial stop -- will not get triggered on L as check happens at flag = 2
+        BP[i] = ( BuyPrice[i] * ( 1 + PT / 100 ) );  										//set profit target
+        PlotText( "BUY\n@\n" + BuyPrice[i], i, L[ i ] - dist[i], colorGreen );
+
+    }
+    else
+        Buy[ i ] = 0; 																			//remove excess buy signals
+
+    if ( Buy[i - 1] OR FB == 2 )																//check is buy signal was generated yesterday and move the stop
+    {
+        BT[i] = Max( BT[i - 1], Max( C[i - 1], C[i - 2] ) * ( 1 - SL / 100 ) ); 		//set running stoploss
+        BP[i] = BP[i - 1];																		//set profit target
+        FB = 2; 																					//flag = 2 means running Buy signal
+
+    }
+
+    if ( ( Min( O[i], L[i] ) < BT[i] OR Max( H[i], O[i] ) > BP[i] ) AND FB == 2 )			//check if buy signal is running and either trail stop (gap down or L) is hit or profit target (gap up or H) is hit
+    {
+        Sell[i] = 1;																				//initiate sell signal
+        SellPrice[i] = IIf( O[i] < BT[i], C[i], IIf( O[i] > BP[i], C[i], IIf( L[i] < BT[i], BT[i], BP[i] ) ) ); //Check trail - (gap down or L) then profit - (gap up or H)
+        PlotText( "SELL\n@\n" + SellPrice[ i ], i, H[ i ] + dist[i], colorRed );
+        FB = 0;																					//reset FlagBuy
+
+    }
+    else
+        Sell[ i ] = 0; 																			//remove excess sell signals
+
+    if ( FS == 0 AND Short[ i ] )																//initial Short signal, set flag as 1 and calculate initial stop
+    {
+        FS = 1; 																					//flag = 1  means Sell Signal is generated
+        ShortPrice[i] = O[i];																//set short price as previous close
+        ST[i] = H[i-1]  * ( 1 + SL / 100 ); 																			//set initial stop -- will not get triggered on H as check happens at flag = 2
+        SP[i] = ( ShortPrice[i] * ( 1 - PT / 100 ) );  									//set profit target
+        PlotText( "SHORT\n@\n" + ShortPrice[i], i, H[ i ] + dist[i], colorGreen );
+
+    }
+    else
+        Short[ i ] = 0; 																		// remove excess buy signals
+
+    if ( Short[i - 1] OR FS == 2 )																//check is short signal was generated yesterday and move the stop
+    {
+        ST[i] = Min( ST[i - 1], Min( C[i - 1], C[i - 2] ) * ( 1 + SL / 100 ) ); 		//set running stoploss
+        SP[i] = SP[i - 1];																		//set profit target
+        FS = 2; 																					//flag = 2 means running Short signal
+
+    }
+
+    if ( ( Max( O[i], H[i] ) > ST[i] OR Min( O[i], L[i] ) < SP[i] ) AND FS == 2 )			//check if short signal is running and either trail stop (gap up or H) is hit or profit target (gap down or L) is hit
+    {
+        Cover[i] = 1;																			//initiate cover signal
+        CoverPrice[i] = IIf( O[i] > ST[i], C[i], IIf( O[i] < SP[i], C[i], IIf( H[i] > ST[i], ST[i], SP[i] ) ) );  //Check trail - (gap up or H) then profit - (gap down or L)
+        PlotText( "COVER\n@\n" + CoverPrice[ i ], i, L[ i ] - dist[i], colorRed );
+        FS = 0;																					//reset FlagShort
+
+    }
+    else
+        Cover[ i ] = 0; 																		// remove excess sell signals
+}
+
+
+Plot( BT, "Buy Trailing Stop", colorAqua, styleDashed );
+Plot( BP, "Buy Profit Target", colorYellow, styleDashed );
+PlotShapes( Buy*shapeUpArrow, colorGreen, 0, Low );
+PlotShapes( Sell*shapeDownArrow, colorRed, 0, High );
+
+
+Plot( ST, "Short Trailing Stop", colorAqua, styleDashed );
+Plot( SP, "Short Profit Target", colorYellow, styleDashed );
+PlotShapes( Short*shapeDownArrow, colorBlueGrey, 0, High );
+PlotShapes( Cover*shapeUpArrow, colorOrange, 0, Low );
+
+
+//EXPLORATION
+
+Filter = Buy OR Sell OR Short OR Cover;
+AddColumn( IIf( Buy, Asc( "Buy" ), IIf( Sell, Asc( "Sell" ), IIf( Short, Asc( "Hort" ), Asc( "Cover" ) ) ) ), "Signal  ", formatChar );
+AddColumn( IIf( Buy, BuyPrice, IIf( Sell, SellPrice, IIf( Short, ShortPrice, CoverPrice ) ) ), "   Price   ", 1.2 );
+AddColumn( IIf( Buy, BT, IIf( Short, ST, 0 ) ), "   StopLoss   ", 1.2 );
+AddColumn( IIf( Buy, BP, IIf( Short, SP, 0 ) ), "   Profit Target  ", 1.2 );
+
+//AlertIf( Buy, "EMAIL", "An Swan Buy alert on " + Name() + " @ " + BuyPrice + " with initial stop @ " + BT + " and Target " + BP + " Buy CE Option - " + (BP + ATR(20)), 1 );
+//AlertIf( Sell, "EMAIL", "An Swan Sell alert on " + Name() + " @ " + SellPrice, 2 );
+//AlertIf( Short, "EMAIL", "An Swan Short alert on " + Name() + " @ " + ShortPrice + " with initial stop @ " + ST + " and Target " + SP + " Buy PE Option - " + (BP - ATR(20)), 3 );
+//AlertIf( Cover, "EMAIL", "An Swan Cover alert on " + Name() + " @ " + CoverPrice, 4 );
+
+_SECTION_END();
